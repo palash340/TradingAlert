@@ -14,6 +14,7 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.aspectj.weaver.ast.Or;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,6 +56,9 @@ public class ZerodhaService {
     String username;
 
     @Autowired
+    private TaskService taskService;
+
+    @Autowired
     private OrderRepository orderRepository;
 
     @Autowired
@@ -67,7 +71,7 @@ public class ZerodhaService {
     Map<IndexName, Order> activeTrades =  new HashMap<>();
 
     @Getter
-    private Map<IndexName, Double> indexCurrentPriceMap = new HashMap<>();
+    private Map<String, Double> indexCurrentPriceMap = new HashMap<>();
 
     private List<CSVRecord> records = new ArrayList<>();
 
@@ -85,11 +89,13 @@ public class ZerodhaService {
         // Load active trades
         List<Order> openOrder = orderRepository.findOpenOrder();
         for (Order order : openOrder) {
-            if(order.getInstrumentSymbol().indexOf("BANKNIFTY") != -1){
+            webSocketClientEndpoint.sendMessage("{\"a\":\"subscribe\",\"v\":["+order.getInstrumentId()+"]}");
+            if(order.getInstrumentSymbol().contains("BANKNIFTY")){
                 activeTrades.put(IndexName.BANKNIFTY, order);
             }else{
                 activeTrades.put(IndexName.NIFTY, order);
             }
+            taskService.submitTask(new OpenOrderMonitor(order, orderRepository, indexCurrentPriceMap));
         }
         try {
             loadInstruments();
@@ -111,7 +117,7 @@ public class ZerodhaService {
         }
         if(file.exists() && StringUtils.isBlank(currentExpiry)){
             LocalDate date = null;
-            LocalDate temp = null;
+            LocalDate temp;
             Iterable<CSVRecord> records = CSVFormat.DEFAULT
                     .withHeader("instrument_token","exchange_token","tradingsymbol","name","last_price","expiry","strike","tick_size","lot_size","instrument_type","segment","exchange").parse(new InputStreamReader(new FileInputStream(file)));
             for (CSVRecord record : records) {
@@ -131,7 +137,7 @@ public class ZerodhaService {
     }
 
 
-    public void generateSignals(ZerodhaTimeFrame zerodhaTimeFrame) throws IOException {
+    public void generateSignals(ZerodhaTimeFrame zerodhaTimeFrame) {
         if(activeTrades.size() == 2){
             return;
         }
@@ -178,7 +184,6 @@ public class ZerodhaService {
                         int lastIndex = zerodhaCandleList.size() - 1;
                         if (!isLastCandleComplete(zerodhaTimeFrame, zerodhaCandleList.get(lastIndex))) {
                             zerodhaCandleList.remove(lastIndex);
-                            lastIndex--;
                         }
                         BarSeries barSeries = new BaseBarSeriesBuilder().withName("dekho").withNumTypeOf(DoubleNum.class).build();
                         for (ZerodhaCandle zerodhaCandle : data.getZerodhaCandleList()) {
@@ -215,19 +220,14 @@ public class ZerodhaService {
         }
 
         StringBuilder sb = new StringBuilder();
-        double bankNiftyPrice = indexCurrentPriceMap.get(IndexName.BANKNIFTY);
-        double niftyPrice = indexCurrentPriceMap.get(IndexName.NIFTY);
+        double bankNiftyPrice = indexCurrentPriceMap.get(IndexName.BANKNIFTY.name());
+        double niftyPrice = indexCurrentPriceMap.get(IndexName.NIFTY.name());
 
         Optional<Map.Entry<ZerodhaInstrument, Bar>> bankNiftyTrade = activeSignal.entrySet().stream().min(Comparator.comparingDouble(i -> Math.abs(i.getKey().getStrike() - bankNiftyPrice)));
         Optional<Map.Entry<ZerodhaInstrument, Bar>> niftyTrade = activeSignal.entrySet().stream().min(Comparator.comparingDouble(i -> Math.abs(i.getKey().getStrike() - niftyPrice)));
 
-        if(bankNiftyTrade.isPresent()){
-            activeTrades.put(IndexName.BANKNIFTY, placeOrder(bankNiftyTrade.get(), sb));
-        }
-
-        if(niftyTrade.isPresent()){
-            activeTrades.put(IndexName.NIFTY, placeOrder(niftyTrade.get(), sb));
-        }
+        bankNiftyTrade.ifPresent(zerodhaInstrumentBarEntry -> activeTrades.put(IndexName.BANKNIFTY, placeOrder(zerodhaInstrumentBarEntry, sb)));
+        niftyTrade.ifPresent(zerodhaInstrumentBarEntry -> activeTrades.put(IndexName.NIFTY, placeOrder(zerodhaInstrumentBarEntry, sb)));
 
         if(sb.toString().length() > 0)
             sendToTelegram(zerodhaTimeFrame.getKey() + "--Testing--" + "%0A" + sb.toString());
@@ -250,16 +250,19 @@ public class ZerodhaService {
         order.setInstrumentSymbol(entry.getKey().getTradingsymbol());
         order.setInstrumentId(entry.getKey().getId());
         webSocketClientEndpoint.sendMessage("{\"a\":\"subscribe\",\"v\":["+order.getInstrumentId()+"]}");
-        return orderRepository.save(order);
+        order = orderRepository.save(order);
+
+        taskService.submitTask(new OpenOrderMonitor(order, orderRepository, indexCurrentPriceMap));
+        return order;
     }
 
 
     private Set<Long> validStrikePrice(IndexName indexName, InstrumentType instrumentType){
         Set<Long> strikeList = new HashSet<>();
 
-        double price = indexCurrentPriceMap.get(indexName);
+        double price = indexCurrentPriceMap.get(indexName.name());
         int optionGap = IndexName.NIFTY ==  indexName ? 50 : 100;
-        long roundOffStrike = (int) (price / optionGap) * optionGap;
+        long roundOffStrike = (long) (price / optionGap) * optionGap;
         if(price != roundOffStrike){
             price = roundOffStrike + optionGap;
         }
@@ -370,11 +373,11 @@ public class ZerodhaService {
                         break;
                     }
                     case VOLUME: {
-                        zerodhaCandle.setVolume(new Integer(candleData.get(i)));
+                        zerodhaCandle.setVolume(Integer.valueOf(candleData.get(i)));
                         break;
                     }
                     case OI: {
-                        zerodhaCandle.setOi(new Integer(candleData.get(i)));
+                        zerodhaCandle.setOi(Integer.valueOf(candleData.get(i)));
                         break;
                     }
                     default:

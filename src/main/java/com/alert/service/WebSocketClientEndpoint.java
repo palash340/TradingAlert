@@ -3,7 +3,6 @@ package com.alert.service;
 import com.alert.domain.IndexName;
 import com.zerodhatech.models.Depth;
 import com.zerodhatech.models.Tick;
-import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -120,17 +119,17 @@ public class WebSocketClientEndpoint {
     @OnMessage
     public void onMessage(ByteBuffer bytes) {
         ArrayList<Tick> tickerData = parseBinary(bytes.array());
-        Map<IndexName, Double> indexCurrentPriceMap = zerodhaService.getIndexCurrentPriceMap();
+        Map<String, Double> indexCurrentPriceMap = zerodhaService.getIndexCurrentPriceMap();
         for(Tick tick : tickerData ) {
-            System.out.println(tick.getInstrumentToken() + " - " +  tick.getLastTradedPrice());
             switch ((int) tick.getInstrumentToken()){
                 case 256265 :
-                    indexCurrentPriceMap.putIfAbsent(IndexName.NIFTY, tick.getLastTradedPrice());
+                    indexCurrentPriceMap.putIfAbsent(IndexName.NIFTY.name(), tick.getLastTradedPrice());
                     break;
                 case 260105 :
-                    indexCurrentPriceMap.putIfAbsent(IndexName.BANKNIFTY, tick.getLastTradedPrice());
+                    indexCurrentPriceMap.putIfAbsent(IndexName.BANKNIFTY.name(), tick.getLastTradedPrice());
                     break;
                 default:
+                    indexCurrentPriceMap.putIfAbsent(String.valueOf(tick.getInstrumentToken()), tick.getLastTradedPrice());
                     break;
             }
         }
