@@ -2,11 +2,10 @@ package com.alert.entity;
 
 import lombok.Data;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
+import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 @Data
 @Entity
@@ -29,4 +28,9 @@ public class Order {
     private LocalDateTime exitTime;
 
     private boolean completed;
+
+    private boolean softStopLossSignal = false;
+
+    @Transient
+    private Map<String, Double> superTrendValues = new HashMap<>();
 }

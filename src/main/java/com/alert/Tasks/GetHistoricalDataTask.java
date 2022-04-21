@@ -23,6 +23,6 @@ public class GetHistoricalDataTask implements Callable<HistoricalData> {
 
     @Override
     public HistoricalData call() throws Exception {
-        return zerodhaService.getHistoricalData(zerodhaInstrument, zerodhaTimeFrame, 4);
+        return zerodhaService.getHistoricalData(zerodhaInstrument, zerodhaTimeFrame, 6);
     }
 }

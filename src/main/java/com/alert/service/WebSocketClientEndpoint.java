@@ -123,13 +123,13 @@ public class WebSocketClientEndpoint {
         for(Tick tick : tickerData ) {
             switch ((int) tick.getInstrumentToken()){
                 case 256265 :
-                    indexCurrentPriceMap.putIfAbsent(IndexName.NIFTY.name(), tick.getLastTradedPrice());
+                    indexCurrentPriceMap.put(IndexName.NIFTY.name(), tick.getLastTradedPrice());
                     break;
                 case 260105 :
-                    indexCurrentPriceMap.putIfAbsent(IndexName.BANKNIFTY.name(), tick.getLastTradedPrice());
+                    indexCurrentPriceMap.put(IndexName.BANKNIFTY.name(), tick.getLastTradedPrice());
                     break;
                 default:
-                    indexCurrentPriceMap.putIfAbsent(String.valueOf(tick.getInstrumentToken()), tick.getLastTradedPrice());
+                    indexCurrentPriceMap.put(String.valueOf(tick.getInstrumentToken()), tick.getLastTradedPrice());
                     break;
             }
         }
