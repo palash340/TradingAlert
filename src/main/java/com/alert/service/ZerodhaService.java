@@ -189,44 +189,14 @@ public class ZerodhaService {
                             barSeries.addBar(zerodhaCandle.getTimestamp().toZonedDateTime(), zerodhaCandle.getOpen(), zerodhaCandle.getHigh(), zerodhaCandle.getLow(), zerodhaCandle.getClose(), zerodhaCandle.getVolume());
                         }
 
-                        SuperTrendIndicator superTrendIndicator72 = new SuperTrendIndicator(barSeries, 2.0, 7);
-                        SuperTrendIndicator superTrendIndicator73 = new SuperTrendIndicator(barSeries, 3.0, 7);
-                        SuperTrendIndicator superTrendIndicator74 = new SuperTrendIndicator(barSeries, 4.0, 7);
-                        SuperTrendIndicator superTrendIndicator75 = new SuperTrendIndicator(barSeries, 5.0, 7);
 
                         int i = 0;
                         IndexName indexName = zi.getTradingsymbol().contains("BANKNIFTY") ? IndexName.BANKNIFTY : IndexName.NIFTY;
                         double closingPrice = barSeries.getBar(barSeries.getEndIndex() - i).getClosePrice().doubleValue();
                         if(activeTrades.containsKey(indexName) && activeTrades.get(indexName).getInstrumentSymbol().equals(zi.getTradingsymbol())){
-                            Order order = activeTrades.get(indexName);
-                            if(closingPrice >= superTrendIndicator75.getValue(barSeries.getEndIndex() - i)){
-                                log.info("Sl hit price closing above super trend 75 {}", indexCurrentPriceMap);
-                                sendAlertToTelegram("Sl hit price closing above super trend 75 " + order.getInstrumentSymbol());
-                                order.setCompleted(true);
-                                order.setExitPrice(indexCurrentPriceMap.get(zi.getId()));
-                                order.setExitTime(LocalDateTime.now());
-                                orderRepository.save(order);
-                                activeTrades.remove(indexName);
-                                webSocketClientEndpoint.sendMessage("{\"a\":\"unsubscribe\",\"v\":[" + order.getInstrumentId() + "]}");
-                                continue;
-                            }
-                            if(!order.isSoftStopLossSignal() && closingPrice > superTrendIndicator73.getValue(barSeries.getEndIndex() - i)){
-                                log.info("Soft Sl hit {}", indexCurrentPriceMap);
-                                sendAlertToTelegram("Soft Sl hit  " + order.getInstrumentSymbol());
-                                order.setSoftStopLossSignal(true);
-                                orderRepository.save(order);
-                            }
-                            order.getSuperTrendValues().put("sup75", superTrendIndicator75.getValue(barSeries.getEndIndex() - i));
-                            order.getSuperTrendValues().put("sup74", superTrendIndicator74.getValue(barSeries.getEndIndex() - i));
-                            order.getSuperTrendValues().put("sup73", superTrendIndicator73.getValue(barSeries.getEndIndex() - i));
-                            order.getSuperTrendValues().put("sup72", superTrendIndicator72.getValue(barSeries.getEndIndex() - i));
-                            continue;
                         }
 
-                        boolean currentCandleSignal = closingPrice > superTrendIndicator72.getValue(barSeries.getEndIndex() - i)
-                                && closingPrice < superTrendIndicator73.getValue(barSeries.getEndIndex() - i)
-                                && closingPrice < superTrendIndicator74.getValue(barSeries.getEndIndex() - i)
-                                && closingPrice < superTrendIndicator75.getValue(barSeries.getEndIndex() - i);
+                        boolean currentCandleSignal = false;
 
                         if (currentCandleSignal) {
                             activeSignal.put(zi, barSeries.getBar(barSeries.getEndIndex() - i));
