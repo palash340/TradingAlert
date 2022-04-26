@@ -208,6 +208,7 @@ public class ZerodhaService {
                                 orderRepository.save(order);
                                 activeTrades.remove(indexName);
                                 webSocketClientEndpoint.sendMessage("{\"a\":\"unsubscribe\",\"v\":[" + order.getInstrumentId() + "]}");
+                                indexCurrentPriceMap.remove(order.getInstrumentId());
                                 continue;
                             }
                             if(!order.isSoftStopLossSignal() && closingPrice > superTrendIndicator73.getValue(barSeries.getEndIndex() - i)){

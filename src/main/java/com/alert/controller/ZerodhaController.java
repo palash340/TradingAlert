@@ -26,6 +26,9 @@ public class ZerodhaController {
     public void generateAlert(){
         if(!enableAlert)
             return;
+        LocalDateTime now = LocalDateTime.now();
+        if(now.getHour() == 9 && now.getMinute() <= 15)
+            return;
         try {
             zerodhaService.generateSignals(ZerodhaTimeFrame.ONE_MINUTE);
         } catch (Exception e) {
