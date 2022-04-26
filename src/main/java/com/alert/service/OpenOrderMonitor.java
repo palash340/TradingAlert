@@ -42,6 +42,7 @@ public class OpenOrderMonitor implements Runnable{
                     IndexName indexName = order.getInstrumentSymbol().contains("BANKNIFTY") ? IndexName.BANKNIFTY : IndexName.NIFTY;
                     zerodhaService.getActiveTrades().remove(indexName);
                     zerodhaService.getWebSocketClientEndpoint().sendMessage("{\"a\":\"unsubscribe\",\"v\":[" + order.getInstrumentId() + "]}");
+                    priceMap.remove(order.getInstrumentId());
                     zerodhaService.sendAlertToTelegram("Hard 20% Sl hit  " + order.getInstrumentSymbol() + ", price: " + priceMap.get(order.getInstrumentId()));
                 }
                 if(priceMap.get(order.getInstrumentId()) <= order.getEntryPrice() * 0.25){ // Target
@@ -54,6 +55,7 @@ public class OpenOrderMonitor implements Runnable{
                     IndexName indexName = order.getInstrumentSymbol().contains("BANKNIFTY") ? IndexName.BANKNIFTY : IndexName.NIFTY;
                     zerodhaService.getActiveTrades().remove(indexName);
                     zerodhaService.getWebSocketClientEndpoint().sendMessage("{\"a\":\"unsubscribe\",\"v\":[" + order.getInstrumentId() + "]}");
+                    priceMap.remove(order.getInstrumentId());
                     zerodhaService.sendAlertToTelegram("Target 75% hit  " + order.getInstrumentSymbol() + ", price: " + priceMap.get(order.getInstrumentId()));
                 }
                 if(order.isSoftStopLossSignal() && order.getSuperTrendValues().get("sup73") >= priceMap.get(order.getInstrumentId())){
@@ -66,6 +68,7 @@ public class OpenOrderMonitor implements Runnable{
                     IndexName indexName = order.getInstrumentSymbol().contains("BANKNIFTY") ? IndexName.BANKNIFTY : IndexName.NIFTY;
                     zerodhaService.getActiveTrades().remove(indexName);
                     zerodhaService.getWebSocketClientEndpoint().sendMessage("{\"a\":\"unsubscribe\",\"v\":[" + order.getInstrumentId() + "]}");
+                    priceMap.remove(order.getInstrumentId());
                     zerodhaService.sendAlertToTelegram("Sl sup73 hit  " + order.getInstrumentSymbol() + ", price: " + priceMap.get(order.getInstrumentId()));
                 }
                 Thread.sleep(200);
