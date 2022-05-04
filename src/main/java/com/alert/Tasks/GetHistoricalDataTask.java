@@ -3,26 +3,29 @@ package com.alert.Tasks;
 import com.alert.domain.HistoricalData;
 import com.alert.domain.ZerodhaInstrument;
 import com.alert.domain.ZerodhaTimeFrame;
-import com.alert.service.ZerodhaService;
+import com.alert.service.HistoricalDataPuller;
 
 import java.util.concurrent.Callable;
 
 public class GetHistoricalDataTask implements Callable<HistoricalData> {
 
-    ZerodhaService zerodhaService;
+    private final HistoricalDataPuller historicalDataPuller;
 
-    ZerodhaInstrument zerodhaInstrument;
+    private final ZerodhaInstrument zerodhaInstrument;
 
-    ZerodhaTimeFrame zerodhaTimeFrame;
+    private final ZerodhaTimeFrame zerodhaTimeFrame;
 
-    public GetHistoricalDataTask(ZerodhaService zerodhaService, ZerodhaInstrument zi, ZerodhaTimeFrame zerodhaTimeFrame){
-        this.zerodhaService = zerodhaService;
+    private final int days;
+
+    public GetHistoricalDataTask(HistoricalDataPuller historicalDataPuller, ZerodhaInstrument zi, ZerodhaTimeFrame zerodhaTimeFrame, int days){
+        this.historicalDataPuller = historicalDataPuller;
         this.zerodhaInstrument = zi;
         this.zerodhaTimeFrame = zerodhaTimeFrame;
+        this.days = days;
     }
 
     @Override
     public HistoricalData call() throws Exception {
-        return zerodhaService.getHistoricalData(zerodhaInstrument, zerodhaTimeFrame, 6);
+        return historicalDataPuller.getHistoricalData(zerodhaInstrument, zerodhaTimeFrame, days);
     }
 }

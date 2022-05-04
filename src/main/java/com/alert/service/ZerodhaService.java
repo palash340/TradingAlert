@@ -1,12 +1,12 @@
 package com.alert.service;
 
 import com.alert.dao.OrderRepository;
-import com.alert.domain.*;
+import com.alert.domain.IndexName;
+import com.alert.domain.InstrumentType;
+import com.alert.domain.ZerodhaInstrument;
+import com.alert.domain.ZerodhaTimeFrame;
 import com.alert.entity.Order;
-import com.alert.service.calc.SuperTrendIndicator;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.alert.Tasks.GetHistoricalDataTask;
-import com.alert.utils.StreamUtils;
 import lombok.Data;
 import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
@@ -14,28 +14,27 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.ta4j.core.Bar;
-import org.ta4j.core.BarSeries;
-import org.ta4j.core.BaseBarSeriesBuilder;
-import org.ta4j.core.num.DoubleNum;
+import org.ta4j.core.*;
+import org.ta4j.core.indicators.EMAIndicator;
+import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
+import org.ta4j.core.rules.CrossedDownIndicatorRule;
+import org.ta4j.core.rules.CrossedUpIndicatorRule;
 
 import javax.annotation.PostConstruct;
 import java.io.*;
-import java.net.CookieManager;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
-import java.time.*;
+import java.nio.file.Files;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 
 @Data
 @Log4j2
@@ -44,6 +43,9 @@ public class ZerodhaService {
 
     @Autowired
     ObjectMapper objectMapper;
+
+    @Autowired
+    private HistoricalDataPuller historicalDataPuller;
 
     @Autowired
     ExecutorService executorService;
@@ -72,11 +74,12 @@ public class ZerodhaService {
     @Getter
     private Map<String, Double> indexCurrentPriceMap = new HashMap<>();
 
-    private List<CSVRecord> records = new ArrayList<>();
+    private List<CSVRecord> indexInstruments = new ArrayList<>();
+    private List<CSVRecord> cmInstruments = new ArrayList<>();
 
     static String DATE_FORMAT = "YYYY-MM-dd"; //2021-03-04
 
-    DateTimeFormatter offsetDateformatter = new DateTimeFormatterBuilder()
+    DateTimeFormatter offsetDateFormatter = new DateTimeFormatterBuilder()
             .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
             .appendOffset("+HHMM","Z")
             .toFormatter();
@@ -85,7 +88,17 @@ public class ZerodhaService {
 
     @PostConstruct
     public void init(){
-        // Load active trades
+//        loadOpenOrder();
+        try {
+            File nfo = loadInstruments("NFO");
+            setCurrentExpiry(nfo);
+            loadInstruments("NSE");
+        } catch (IOException e) {
+            log.error("Error while loading instrument ", e);
+        }
+    }
+
+    private void loadOpenOrder(){
         List<Order> openOrder = orderRepository.findOpenOrder();
         for (Order order : openOrder) {
             webSocketClientEndpoint.sendMessage("{\"a\":\"subscribe\",\"v\":["+order.getInstrumentId()+"]}");
@@ -95,33 +108,17 @@ public class ZerodhaService {
                 activeTrades.put(IndexName.NIFTY, order);
             }
             indexCurrentPriceMap.put(order.getInstrumentId(), order.getEntryPrice());
-            taskService.submitTask(new OpenOrderMonitor(order, orderRepository, indexCurrentPriceMap, this));
-        }
-        try {
-            loadInstruments();
-        } catch (IOException e) {
-            e.printStackTrace();
+            //taskService.submitTask(new OpenOrderMonitor(order, orderRepository, indexCurrentPriceMap, this));
         }
     }
 
-    private void loadInstruments() throws IOException {
-        String fileName = "NFO_" + dtf.format(LocalDate.now()) + ".csv";
-        File file = new File(fileName);
-        if(!file.exists()){
-            URL url = new URL("https://api.kite.trade/instruments/NFO");
-            HttpURLConnection con = (HttpURLConnection) url.openConnection();
-            con.setRequestMethod("GET");
-            int responseCode = con.getResponseCode();
-            if(responseCode == 200)
-                FileUtils.copyInputStreamToFile(con.getInputStream(), file);
-        }
-        if(file.exists() && StringUtils.isBlank(currentExpiry)){
+    private void setCurrentExpiry(File nfo) throws IOException {
+        if(!Objects.isNull(nfo) && nfo.exists() && StringUtils.isBlank(currentExpiry)){
             LocalDate date = null;
             LocalDate temp;
             Iterable<CSVRecord> records = CSVFormat.DEFAULT
-                    .withHeader("instrument_token","exchange_token","tradingsymbol","name","last_price","expiry","strike","tick_size","lot_size","instrument_type","segment","exchange").parse(new InputStreamReader(new FileInputStream(file)));
+                    .withHeader("instrument_token","exchange_token","tradingsymbol","name","last_price","expiry","strike","tick_size","lot_size","instrument_type","segment","exchange").parse(new InputStreamReader(Files.newInputStream(nfo.toPath())));
             for (CSVRecord record : records) {
-                this.records.add(record);
                 if("expiry".equals(record.get("expiry")) || indexListToBeIgnored.contains(record.get("name"))){
                     continue;
                 }
@@ -136,17 +133,72 @@ public class ZerodhaService {
         }
     }
 
+    private File loadInstruments(String scripts) throws IOException {
+        String fileName = scripts + "_" + dtf.format(LocalDate.now()) + ".csv";
+        File file = new File(fileName);
+        if(!file.exists()){
+            URL url = new URL("https://api.kite.trade/instruments/" + scripts);
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con.setRequestMethod("GET");
+            int responseCode = con.getResponseCode();
+            if(responseCode == 200)
+                FileUtils.copyInputStreamToFile(con.getInputStream(), file);
+        }
+        if(file.exists()) {
+            Iterable<CSVRecord> records = CSVFormat.DEFAULT
+                    .withHeader("instrument_token", "exchange_token", "tradingsymbol", "name", "last_price", "expiry", "strike", "tick_size", "lot_size", "instrument_type", "segment", "exchange").parse(new InputStreamReader(new FileInputStream(file)));
+            for (CSVRecord record : records) {
+                if ("expiry".equals(record.get("expiry")) || indexListToBeIgnored.contains(record.get("name"))) {
+                    continue;
+                }
+                List<CSVRecord> recordList = scripts.equals("NFO") ? this.indexInstruments : this.cmInstruments;
+                recordList.add(record);
+            }
+        }
+        return file;
+    }
 
-    public void generateSignals(ZerodhaTimeFrame zerodhaTimeFrame) {
+
+    public void generateSignals(ZerodhaTimeFrame zerodhaTimeFrame) throws IOException {
         log.info("priceMap {}", indexCurrentPriceMap);
-        Map<ZerodhaInstrument, Bar> activeSignal = new HashMap<>();
-        Map<ZerodhaInstrument, Future<HistoricalData>> futureTasks = new HashMap<>();
+        List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("INDUSINDBK","COALINDIA","POWERGRID","TATASTEEL","ITC","BPCL","HDFC","HDFCBANK","SHREECEM","NTPC","UPL","ULTRACEMCO","JSWSTEEL","HINDALCO","BHARTIARTL","NESTLEIND","ADANIPORTS","BAJAJFINSV","M&M","DIVISLAB","AXISBANK","TATACONSUM","CIPLA","DRREDDY","TCS","ICICIBANK","HINDUNILVR","RELIANCE","BRITANNIA","HDFCLIFE","SUNPHARMA","GRASIM","BAJFINANCE","LT","HEROMOTOCO","KOTAKBANK","SBIN","TATAMOTORS","HCLTECH","MARUTI","ASIANPAINT","INFY","ONGC","TECHM","SBILIFE","WIPRO","BAJAJ-AUTO","TITAN","APOLLOHOSP","EICHERMOT"));
+        for (ZerodhaInstrument validInstrument : validInstruments) {
+            BarSeries historicalBarSeries = historicalDataPuller.getHistoricalBarSeries(validInstrument, ZerodhaTimeFrame.FIFTEEN_MINUTE, 180);
+            Strategy strategy = buildStrategy(historicalBarSeries);
+            BarSeriesManager seriesManager = new BarSeriesManager(historicalBarSeries);
+            TradingRecord tradingRecord = seriesManager.run(strategy);
+            double profit = 0;
+            for (Position position : tradingRecord.getPositions()) {
+                profit = profit + position.getGrossProfit().doubleValue();
 
-        for (CSVRecord record : records) {
+            }
+            System.out.println(validInstrument.getTradingsymbol() + " : " + profit);
+            log.info("tradingRecord {}", tradingRecord);
+        }
+    }
+
+    private List<ZerodhaInstrument> getInstrumentsFromSymbol(List<String> symbols){
+        List<ZerodhaInstrument> list = new ArrayList<>();
+        for (CSVRecord cmInstrument : cmInstruments) {
+            if(symbols.contains(cmInstrument.get("tradingsymbol"))) {
+                ZerodhaInstrument zi = new ZerodhaInstrument();
+                zi.setId(cmInstrument.get("instrument_token"));
+                zi.setInstrumentType(InstrumentType.EQ);
+                zi.setName(cmInstrument.get("name"));
+                zi.setStrike(0);
+                zi.setTradingsymbol(cmInstrument.get("tradingsymbol"));
+                list.add(zi);
+            }
+        }
+        return list;
+    }
+    private List<ZerodhaInstrument> getValidInstruments(){
+        List<ZerodhaInstrument> list = new ArrayList<>();
+        for (CSVRecord record : cmInstruments) {
             for (IndexName indexName : IndexName.values()) {
                 double price = indexCurrentPriceMap.get(indexName.name());
                 if(activeTrades.containsKey(indexName) && !activeTrades.get(indexName).getInstrumentSymbol().equals(record.get("tradingsymbol"))){
-                        continue;
+                    continue;
                 }
 
                 if(indexName.name().equals(record.get("name")) && currentExpiry.equals(record.get("expiry"))){
@@ -158,75 +210,12 @@ public class ZerodhaService {
                     zi.setTradingsymbol(record.get("tradingsymbol"));
                     zi.setExpiry(LocalDate.parse(record.get("expiry")));
                     if(validStrikePrice(price, indexName, zi.getInstrumentType()) == zi.getStrike() || activeTrades.containsKey(indexName)) {
-                        futureTasks.put(zi, executorService.submit(new GetHistoricalDataTask(this, zi, zerodhaTimeFrame)));
+                        list.add(zi);
                     }
                 }
             }
         }
-        while(!futureTasks.isEmpty()){
-            List<ZerodhaInstrument> zerodhaInstrumentList = new ArrayList<>();
-            for(Map.Entry<ZerodhaInstrument, Future<HistoricalData>> zerodhaInstrumentFutureEntry : futureTasks.entrySet()) {
-                Future<HistoricalData> dataFuture = zerodhaInstrumentFutureEntry.getValue();
-                if(dataFuture.isDone()){
-                    ZerodhaInstrument zi = zerodhaInstrumentFutureEntry.getKey();
-                    HistoricalData data = null;
-                    try {
-                        data = dataFuture.get();
-                    } catch (InterruptedException | ExecutionException e) {
-                        e.printStackTrace();
-                    }
-                    zerodhaInstrumentList.add(zi);
-                    if(data != null) {
-                        List<ZerodhaCandle> zerodhaCandleList = data.getZerodhaCandleList();
-                        if (zerodhaCandleList.size() == 0)
-                            continue;
-                        int lastIndex = zerodhaCandleList.size() - 1;
-                        if (!isLastCandleComplete(zerodhaTimeFrame, zerodhaCandleList.get(lastIndex))) {
-                            zerodhaCandleList.remove(lastIndex);
-                        }
-                        BarSeries barSeries = new BaseBarSeriesBuilder().withName("dekho").withNumTypeOf(DoubleNum.class).build();
-                        for (ZerodhaCandle zerodhaCandle : data.getZerodhaCandleList()) {
-                            barSeries.addBar(zerodhaCandle.getTimestamp().toZonedDateTime(), zerodhaCandle.getOpen(), zerodhaCandle.getHigh(), zerodhaCandle.getLow(), zerodhaCandle.getClose(), zerodhaCandle.getVolume());
-                        }
-
-
-                        int i = 0;
-                        IndexName indexName = zi.getTradingsymbol().contains("BANKNIFTY") ? IndexName.BANKNIFTY : IndexName.NIFTY;
-                        double closingPrice = barSeries.getBar(barSeries.getEndIndex() - i).getClosePrice().doubleValue();
-                        if(activeTrades.containsKey(indexName) && activeTrades.get(indexName).getInstrumentSymbol().equals(zi.getTradingsymbol())){
-                        }
-
-                        boolean currentCandleSignal = false;
-
-                        if (currentCandleSignal) {
-                            activeSignal.put(zi, barSeries.getBar(barSeries.getEndIndex() - i));
-                        }
-                    }
-                }
-            }
-            for(ZerodhaInstrument zi : zerodhaInstrumentList){
-                futureTasks.remove(zi);
-            }
-            zerodhaInstrumentList.clear();
-        }
-
-        StringBuilder sb = new StringBuilder();
-        double bankNiftyPrice = indexCurrentPriceMap.get(IndexName.BANKNIFTY.name());
-        double niftyPrice = indexCurrentPriceMap.get(IndexName.NIFTY.name());
-
-        Optional<Map.Entry<ZerodhaInstrument, Bar>> bankNiftyTrade = activeSignal.entrySet().stream().filter(zerodhaInstrumentBarEntry -> zerodhaInstrumentBarEntry.getKey().getTradingsymbol().contains("BANKNIFTY")).min(Comparator.comparingDouble(i -> Math.abs(i.getKey().getStrike() - bankNiftyPrice)));
-        Optional<Map.Entry<ZerodhaInstrument, Bar>> niftyTrade = activeSignal.entrySet().stream().filter(zerodhaInstrumentBarEntry -> !zerodhaInstrumentBarEntry.getKey().getTradingsymbol().contains("BANKNIFTY")).min(Comparator.comparingDouble(i -> Math.abs(i.getKey().getStrike() - niftyPrice)));
-
-        if(bankNiftyTrade.isPresent() && bankNiftyTrade.get().getKey().getTradingsymbol().contains("BANKNIFTY")){
-            activeTrades.put(IndexName.BANKNIFTY, placeOrder(bankNiftyTrade.get(), sb));
-        }
-        if(niftyTrade.isPresent() && !niftyTrade.get().getKey().getTradingsymbol().contains("BANKNIFTY")){
-            activeTrades.put(IndexName.NIFTY, placeOrder(niftyTrade.get(), sb));
-        }
-
-        if(sb.toString().length() > 0) {
-            sendAlertToTelegram(zerodhaTimeFrame.getKey() + "--Testing--" + "%0A" + sb.toString());
-        }
+        return list;
     }
 
     public void sendAlertToTelegram(String message){
@@ -254,11 +243,9 @@ public class ZerodhaService {
         webSocketClientEndpoint.sendMessage("{\"a\":\"subscribe\",\"v\":["+order.getInstrumentId()+"]}");
         order = orderRepository.save(order);
 
-        taskService.submitTask(new OpenOrderMonitor(order, orderRepository, indexCurrentPriceMap, this));
+       // taskService.submitTask(new OpenOrderMonitor(order, orderRepository, indexCurrentPriceMap, this));
         return order;
     }
-
-
     private int validStrikePrice(double price, IndexName indexName, InstrumentType instrumentType){
         int optionGap = IndexName.NIFTY == indexName ? 50 : 100;
         int roundOffStrike = (int) (price/ optionGap) * optionGap;
@@ -273,111 +260,17 @@ public class ZerodhaService {
             }
         }
     }
-
-    private boolean isLastCandleComplete(ZerodhaTimeFrame zerodhaTimeFrame, ZerodhaCandle zerodhaCandle){
-        Duration between = Duration.between(zerodhaCandle.getTimestamp(), OffsetDateTime.now());
-        return between.toMinutes() >= zerodhaTimeFrame.getMinutes();
-    }
-
-    private Map<IndexName, Double> loadLtp() throws IOException {
-        URL url = new URL("https://api.kite.trade/quote/ltp?i=NSE:NIFTY+BANK&i=NSE:NIFTY+50");
-        HttpURLConnection con = (HttpURLConnection) url.openConnection();
-        con.setRequestMethod("GET");
-        con.setRequestProperty("authority", "kite.zerodha.com");
-        con.setRequestProperty("accept-language", "en-US,en;q=0.9");
-        con.setRequestProperty("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.67 Safari/537.36");
-        con.setRequestProperty("authorization", "enctoken " + authToken);
-        int responseCode = con.getResponseCode();
-        String jsonResponse = null;
-        if(responseCode == 200)
-            jsonResponse = StreamUtils.convertStreamToString(con.getInputStream());
-        return parseLtpResponseJson(jsonResponse);
-    }
-
-    private Map<IndexName, Double> parseLtpResponseJson(String jsonResponse){
-        Map<IndexName, Double> map = new HashMap<>();
-        JSONObject rootObject = new JSONObject(jsonResponse).getJSONObject("data");
-        for (IndexName indexName : IndexName.values()) {
-            map.put(indexName, rootObject.getJSONObject("NSE:" + indexName.getZerodhaInstrumentName()).getDouble("last_price"));
-        }
-        return map;
-    }
-
-    private String buildURL (String instrumentId, ZerodhaTimeFrame timeFrame , int days){
-        StringBuilder sb = new StringBuilder();
-        sb.append("https://kite.zerodha.com/oms/instruments/historical/");
-        sb.append(instrumentId);
-        sb.append("/");
-        sb.append(timeFrame.getKey());
-        sb.append("?user_id=");
-        sb.append(username);
-        sb.append("&oi=1&from=");
-        sb.append(dtf.format(LocalDate.now().plusDays(-days)));
-        sb.append("&to=");
-        sb.append(dtf.format(LocalDate.now()));
-        sb.append("&ciqrandom=");
-        sb.append((long) Math. floor(Math. random() * 9000000000000L) + 1000000000000L);
-        return sb.toString();
-    }
-
-    public HistoricalData getHistoricalData(ZerodhaInstrument zi, ZerodhaTimeFrame timeFrame , int days) throws IOException {
-        URL url = new URL(buildURL(zi.getId(),timeFrame,days));
-        CookieManager cookieManager = new CookieManager();
-        HttpURLConnection con = (HttpURLConnection) url.openConnection();
-        con.setRequestMethod("GET");
-        con.setRequestProperty("authority", "kite.zerodha.com");
-        con.setRequestProperty("accept-language", "en-US,en;q=0.9");
-        con.setRequestProperty("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.67 Safari/537.36");
-        con.setRequestProperty("authorization", "enctoken "+ authToken);
-        int responseCode = con.getResponseCode();
-        if(responseCode != 200)
+    public Strategy buildStrategy(BarSeries barSeries){
+        if(barSeries == null)
             return null;
-        String jsonResponse = StreamUtils.convertStreamToString(con.getInputStream());
-        return parseHistoricalData(objectMapper.readValue(jsonResponse, HistoricalData.class));
-    }
 
-    private HistoricalData parseHistoricalData(HistoricalData data){
-        List<ZerodhaCandle> zerodhaCandles = new ArrayList<>();
-        data.setZerodhaCandleList(zerodhaCandles);
-        for (List<String> candleData: data.getData().getCandles()) {
-            ZerodhaCandle zerodhaCandle = new ZerodhaCandle();
-            for(int i = 0; i < candleData.size(); i++){
-                switch (ZerodhaCandleIndex.findEnum(i)){
-                    case TIMESTAMP: {
-                        zerodhaCandle.setTimestamp(OffsetDateTime.parse(candleData.get(i), offsetDateformatter));
-                        break;
-                    }
-                    case HIGH: {
-                        zerodhaCandle.setHigh(new Double(candleData.get(i)));
-                        break;
-                    }
-                    case OPEN: {
-                        zerodhaCandle.setOpen(new Double(candleData.get(i)));
-                        break;
-                    }
-                    case LOW: {
-                        zerodhaCandle.setLow(new Double(candleData.get(i)));
-                        break;
-                    }
-                    case CLOSE: {
-                        zerodhaCandle.setClose(new Double(candleData.get(i)));
-                        break;
-                    }
-                    case VOLUME: {
-                        zerodhaCandle.setVolume(Integer.valueOf(candleData.get(i)));
-                        break;
-                    }
-                    case OI: {
-                        zerodhaCandle.setOi(Integer.valueOf(candleData.get(i)));
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
-            zerodhaCandles.add(zerodhaCandle);
-        }
-        return data;
+        ClosePriceIndicator closePriceIndicator = new ClosePriceIndicator(barSeries);
+        /*EMAIndicator ema55 = new EMAIndicator(closePriceIndicator,55);
+        EMAIndicator ema = new EMAIndicator(closePriceIndicator,55);
+        return new BaseStrategy(new OverIndicatorRule(ema55, closePriceIndicator), new UnderIndicatorRule(ema, closePriceIndicator));*/
+        EMAIndicator ema13 = new EMAIndicator(closePriceIndicator,13);
+        EMAIndicator ema21 = new EMAIndicator(closePriceIndicator,100);
+        return new BaseStrategy(new CrossedUpIndicatorRule(ema13, ema21), new CrossedDownIndicatorRule(ema13, ema21));
     }
 
     public void sendToTelegram(String message, String chatId) {
@@ -385,10 +278,6 @@ public class ZerodhaService {
 
         //Add Telegram token
         String apiToken = "1619143576:AAGfUm7ZC-bjCvggzBm0l0OIHM-mPjjt7K0";
-
-        //Add chatId
-        //String chatId = "672190792";
-        //String chatId = "-680866934";
 
         urlString = String.format(urlString, apiToken, chatId, message);
         URL url;
@@ -399,13 +288,13 @@ public class ZerodhaService {
             conn = url.openConnection();
             inputStream = new BufferedInputStream(conn.getInputStream());
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("Error while sending message to telegram ", e);
         }finally {
             if(inputStream != null) {
                 try {
                     inputStream.close();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    log.warn("Error while closing stream", e);
                 }
             }
 

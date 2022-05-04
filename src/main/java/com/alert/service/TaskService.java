@@ -4,8 +4,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 @Service
 public class TaskService {
@@ -17,7 +19,7 @@ public class TaskService {
         executorService = Executors.newFixedThreadPool(2);
     }
 
-    public void submitTask(Runnable runnable){
-        executorService.submit(runnable);
+    public Future submitTask(Callable callable){
+        return executorService.submit(callable);
     }
 }
