@@ -6,6 +6,7 @@ import com.alert.domain.InstrumentType;
 import com.alert.domain.ZerodhaInstrument;
 import com.alert.domain.ZerodhaTimeFrame;
 import com.alert.entity.Order;
+import com.alert.service.calc.SuperTrendIndicator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
 import lombok.Getter;
@@ -18,10 +19,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.ta4j.core.*;
+import org.ta4j.core.analysis.criteria.pnl.GrossProfitCriterion;
+import org.ta4j.core.analysis.criteria.pnl.GrossReturnCriterion;
+import org.ta4j.core.indicators.ATRIndicator;
 import org.ta4j.core.indicators.EMAIndicator;
+import org.ta4j.core.indicators.RSIIndicator;
+import org.ta4j.core.indicators.SMAIndicator;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 import org.ta4j.core.rules.CrossedDownIndicatorRule;
 import org.ta4j.core.rules.CrossedUpIndicatorRule;
+import org.ta4j.core.rules.OverIndicatorRule;
+import org.ta4j.core.rules.UnderIndicatorRule;
 
 import javax.annotation.PostConstruct;
 import java.io.*;
@@ -161,18 +169,20 @@ public class ZerodhaService {
 
     public void generateSignals(ZerodhaTimeFrame zerodhaTimeFrame) throws IOException {
         log.info("priceMap {}", indexCurrentPriceMap);
-        List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("INDUSINDBK","COALINDIA","POWERGRID","TATASTEEL","ITC","BPCL","HDFC","HDFCBANK","SHREECEM","NTPC","UPL","ULTRACEMCO","JSWSTEEL","HINDALCO","BHARTIARTL","NESTLEIND","ADANIPORTS","BAJAJFINSV","M&M","DIVISLAB","AXISBANK","TATACONSUM","CIPLA","DRREDDY","TCS","ICICIBANK","HINDUNILVR","RELIANCE","BRITANNIA","HDFCLIFE","SUNPHARMA","GRASIM","BAJFINANCE","LT","HEROMOTOCO","KOTAKBANK","SBIN","TATAMOTORS","HCLTECH","MARUTI","ASIANPAINT","INFY","ONGC","TECHM","SBILIFE","WIPRO","BAJAJ-AUTO","TITAN","APOLLOHOSP","EICHERMOT"));
+        GrossReturnCriterion grossReturnCriterion = new GrossReturnCriterion();
+       // List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("INDUSINDBK","COALINDIA","POWERGRID","TATASTEEL","ITC","BPCL","HDFC","HDFCBANK","SHREECEM","NTPC","UPL","ULTRACEMCO","JSWSTEEL","HINDALCO","BHARTIARTL","NESTLEIND","ADANIPORTS","BAJAJFINSV","M&M","DIVISLAB","AXISBANK","TATACONSUM","CIPLA","DRREDDY","TCS","ICICIBANK","HINDUNILVR","RELIANCE","BRITANNIA","HDFCLIFE","SUNPHARMA","GRASIM","BAJFINANCE","LT","HEROMOTOCO","KOTAKBANK","SBIN","TATAMOTORS","HCLTECH","MARUTI","ASIANPAINT","INFY","ONGC","TECHM","SBILIFE","WIPRO","BAJAJ-AUTO","TITAN","APOLLOHOSP","EICHERMOT"));
+        List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("TCS"));
         for (ZerodhaInstrument validInstrument : validInstruments) {
             BarSeries historicalBarSeries = historicalDataPuller.getHistoricalBarSeries(validInstrument, ZerodhaTimeFrame.FIFTEEN_MINUTE, 180);
             Strategy strategy = buildStrategy(historicalBarSeries);
             BarSeriesManager seriesManager = new BarSeriesManager(historicalBarSeries);
-            TradingRecord tradingRecord = seriesManager.run(strategy);
+            TradingRecord tradingRecord = seriesManager.run(strategy, Trade.TradeType.BUY);
             double profit = 0;
             for (Position position : tradingRecord.getPositions()) {
                 profit = profit + position.getGrossProfit().doubleValue();
-
             }
             System.out.println(validInstrument.getTradingsymbol() + " : " + profit);
+            System.out.println(validInstrument.getTradingsymbol() + " : " + grossReturnCriterion.calculate(historicalBarSeries, tradingRecord));
             log.info("tradingRecord {}", tradingRecord);
         }
     }
@@ -268,9 +278,15 @@ public class ZerodhaService {
         /*EMAIndicator ema55 = new EMAIndicator(closePriceIndicator,55);
         EMAIndicator ema = new EMAIndicator(closePriceIndicator,55);
         return new BaseStrategy(new OverIndicatorRule(ema55, closePriceIndicator), new UnderIndicatorRule(ema, closePriceIndicator));*/
+
+        SMAIndicator sma;
+        ATRIndicator atr;
         EMAIndicator ema13 = new EMAIndicator(closePriceIndicator,13);
         EMAIndicator ema21 = new EMAIndicator(closePriceIndicator,100);
-        return new BaseStrategy(new CrossedUpIndicatorRule(ema13, ema21), new CrossedDownIndicatorRule(ema13, ema21));
+        RSIIndicator rsi14 = new RSIIndicator(closePriceIndicator, 14);
+        //RSIIndicator rsi50 = new RSIIndicator(closePriceIndicator, 50);
+        SuperTrendIndicator sup73 = new SuperTrendIndicator(barSeries, 7.0, 3);
+        return new BaseStrategy(new UnderIndicatorRule(rsi14, 50), new CrossedDownIndicatorRule(ema13, ema21));
     }
 
     public void sendToTelegram(String message, String chatId) {
