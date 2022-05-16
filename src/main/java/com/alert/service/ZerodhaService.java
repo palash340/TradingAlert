@@ -19,7 +19,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.ta4j.core.*;
-import org.ta4j.core.analysis.criteria.pnl.GrossProfitCriterion;
 import org.ta4j.core.analysis.criteria.pnl.GrossReturnCriterion;
 import org.ta4j.core.indicators.ATRIndicator;
 import org.ta4j.core.indicators.EMAIndicator;
@@ -27,8 +26,6 @@ import org.ta4j.core.indicators.RSIIndicator;
 import org.ta4j.core.indicators.SMAIndicator;
 import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
 import org.ta4j.core.rules.CrossedDownIndicatorRule;
-import org.ta4j.core.rules.CrossedUpIndicatorRule;
-import org.ta4j.core.rules.OverIndicatorRule;
 import org.ta4j.core.rules.UnderIndicatorRule;
 
 import javax.annotation.PostConstruct;
@@ -170,20 +167,29 @@ public class ZerodhaService {
     public void generateSignals(ZerodhaTimeFrame zerodhaTimeFrame) throws IOException {
         log.info("priceMap {}", indexCurrentPriceMap);
         GrossReturnCriterion grossReturnCriterion = new GrossReturnCriterion();
-       // List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("INDUSINDBK","COALINDIA","POWERGRID","TATASTEEL","ITC","BPCL","HDFC","HDFCBANK","SHREECEM","NTPC","UPL","ULTRACEMCO","JSWSTEEL","HINDALCO","BHARTIARTL","NESTLEIND","ADANIPORTS","BAJAJFINSV","M&M","DIVISLAB","AXISBANK","TATACONSUM","CIPLA","DRREDDY","TCS","ICICIBANK","HINDUNILVR","RELIANCE","BRITANNIA","HDFCLIFE","SUNPHARMA","GRASIM","BAJFINANCE","LT","HEROMOTOCO","KOTAKBANK","SBIN","TATAMOTORS","HCLTECH","MARUTI","ASIANPAINT","INFY","ONGC","TECHM","SBILIFE","WIPRO","BAJAJ-AUTO","TITAN","APOLLOHOSP","EICHERMOT"));
-        List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("TCS"));
+        List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("INDUSINDBK","COALINDIA","POWERGRID","TATASTEEL","ITC","BPCL","HDFC","HDFCBANK","SHREECEM","NTPC","UPL","ULTRACEMCO","JSWSTEEL","HINDALCO","BHARTIARTL","NESTLEIND","ADANIPORTS","BAJAJFINSV","M&M","DIVISLAB","AXISBANK","TATACONSUM","CIPLA","DRREDDY","TCS","ICICIBANK","HINDUNILVR","RELIANCE","BRITANNIA","HDFCLIFE","SUNPHARMA","GRASIM","BAJFINANCE","LT","HEROMOTOCO","KOTAKBANK","SBIN","TATAMOTORS","HCLTECH","MARUTI","ASIANPAINT","INFY","ONGC","TECHM","SBILIFE","WIPRO","BAJAJ-AUTO","TITAN","APOLLOHOSP","EICHERMOT"));
+        //List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("TCS"));
         for (ZerodhaInstrument validInstrument : validInstruments) {
             BarSeries historicalBarSeries = historicalDataPuller.getHistoricalBarSeries(validInstrument, ZerodhaTimeFrame.FIFTEEN_MINUTE, 180);
-            Strategy strategy = buildStrategy(historicalBarSeries);
-            BarSeriesManager seriesManager = new BarSeriesManager(historicalBarSeries);
-            TradingRecord tradingRecord = seriesManager.run(strategy, Trade.TradeType.BUY);
-            double profit = 0;
-            for (Position position : tradingRecord.getPositions()) {
-                profit = profit + position.getGrossProfit().doubleValue();
+            int endIndex = historicalBarSeries.getEndIndex();
+
+
+        }
+    }
+
+    public void findEngulfingCandle(ZerodhaTimeFrame zerodhaTimeFrame) throws IOException {
+        List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("INDUSINDBK","COALINDIA","POWERGRID","TATASTEEL","ITC","BPCL","HDFC","HDFCBANK","SHREECEM","NTPC","UPL","ULTRACEMCO","JSWSTEEL","HINDALCO","BHARTIARTL","NESTLEIND","ADANIPORTS","BAJAJFINSV","M&M","DIVISLAB","AXISBANK","TATACONSUM","CIPLA","DRREDDY","TCS","ICICIBANK","HINDUNILVR","RELIANCE","BRITANNIA","HDFCLIFE","SUNPHARMA","GRASIM","BAJFINANCE","LT","HEROMOTOCO","KOTAKBANK","SBIN","TATAMOTORS","HCLTECH","MARUTI","ASIANPAINT","INFY","ONGC","TECHM","SBILIFE","WIPRO","BAJAJ-AUTO","TITAN","APOLLOHOSP","EICHERMOT"));
+        //List<ZerodhaInstrument> validInstruments = getInstrumentsFromSymbol(Arrays.asList("TCS"));
+        for (ZerodhaInstrument validInstrument : validInstruments) {
+            BarSeries historicalBarSeries = historicalDataPuller.getHistoricalBarSeries(validInstrument, ZerodhaTimeFrame.FIFTEEN_MINUTE, 180);
+            int endIndex = historicalBarSeries.getEndIndex();
+            Bar lastBar = historicalBarSeries.getBar(endIndex);
+            Bar secondLastBar = historicalBarSeries.getBar(endIndex-1);
+            if(lastBar.getHighPrice().isGreaterThanOrEqual(secondLastBar.getHighPrice())  && lastBar.getLowPrice().isLessThanOrEqual(secondLastBar.getLowPrice())){
+               if((lastBar.isBearish() && secondLastBar.isBullish()) || (lastBar.isBullish() && secondLastBar.isBearish()))
+                 log.info(validInstrument.getTradingsymbol());
             }
-            System.out.println(validInstrument.getTradingsymbol() + " : " + profit);
-            System.out.println(validInstrument.getTradingsymbol() + " : " + grossReturnCriterion.calculate(historicalBarSeries, tradingRecord));
-            log.info("tradingRecord {}", tradingRecord);
+
         }
     }
 
@@ -229,8 +235,7 @@ public class ZerodhaService {
     }
 
     public void sendAlertToTelegram(String message){
-        sendToTelegram(message, "-680866934");
-        sendToTelegram(message, "-638700096");
+        sendToTelegram(message, "-672190792");
     }
 
     public Order placeOrder(Map.Entry<ZerodhaInstrument, Bar> entry, StringBuilder sb){
