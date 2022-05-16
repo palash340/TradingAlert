@@ -23,10 +23,8 @@ public class ZerodhaController {
     @RequestMapping("/generateAlert")
 //    @Scheduled(cron = "0 * 9-15 * * MON-FRI", zone = "IST")
     public void generateAlert(){
-        if(!enableAlert)
-            return;
         try {
-            zerodhaService.generateSignals(ZerodhaTimeFrame.ONE_MINUTE);
+            zerodhaService.findEngulfingCandle(ZerodhaTimeFrame.FIVE_MINUTE);
         } catch (Exception e) {
             log.error("Error while generating signal", e);
         }
