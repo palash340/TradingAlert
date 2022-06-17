@@ -24,7 +24,7 @@ public class ZerodhaController {
 //    @Scheduled(cron = "0 * 9-15 * * MON-FRI", zone = "IST")
     public void generateAlert(){
         try {
-            zerodhaService.findEngulfingCandle(ZerodhaTimeFrame.FIVE_MINUTE);
+            zerodhaService.findEngulfingCandle(ZerodhaTimeFrame.FIFTEEN_MINUTE);
         } catch (Exception e) {
             log.error("Error while generating signal", e);
         }
